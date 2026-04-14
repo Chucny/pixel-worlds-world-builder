@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>World Builder (Light Mode)</title>
+
+<style>
+body {
+  margin: 0;
+  display: flex;
+  font-family: Arial, sans-serif;
+  background: #f5f5f5;
+  color: #222;
+}
+
+/* LEFT PANEL */
+#panel {
+  width: 280px;
+  background: #ffffff;
+  border-right: 1px solid #ddd;
+  padding: 10px;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+h3 {
+  margin: 8px 0;
+}
+
+input, button {
+  width: 100%;
+  padding: 6px;
+  margin: 5px 0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+button {
+  cursor: pointer;
+  background: #eaeaea;
+}
+
+button:hover {
+  background: #ddd;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  cursor: pointer;
+  border-bottom: 1px solid #eee;
+}
+
+.item:hover {
+  background: #f0f0f0;
+}
+
+.item img {
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+  border: 1px solid #ccc;
+}
+
+.selected {
+  background: #dff0ff;
+}
+
+/* CANVAS */
+#canvas {
+  background: #ffffff;
+  cursor: crosshair;
+}
+</style>
+</head>
+
+<body>
+
+<div id="panel">
+  <h3>🌍 World Builder</h3>
+
+  <input type="file" id="fileInput" multiple accept="image/*">
+
+  <input id="search" placeholder="Search textures...">
+
+  <input id="w" type="number" value="30" placeholder="Width (tiles)">
+  <input id="h" type="number" value="20" placeholder="Height (tiles)">
+
+  <button onclick="createWorld()">Create World</button>
+
+  <hr>
+
+  <div id="items"></div>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+const TILE = 32;
+
+let worldW = 30;
+let worldH = 20;
+
+let world = [];
+let textures = [];
+let selected = null;
+
+// ─────────────────────────────
+// FIXED DPI SCALING
+// ─────────────────────────────
+function setupCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+
+  canvas.width = worldW * TILE * dpr;
+  canvas.height = worldH * TILE * dpr;
+
+  canvas.style.width = (worldW * TILE) + "px";
+  canvas.style.height = (worldH * TILE) + "px";
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+// ─────────────────────────────
+function createWorld() {
+  worldW = parseInt(document.getElementById("w").value);
+  worldH = parseInt(document.getElementById("h").value);
+
+  world = Array.from({ length: worldH }, () =>
+    Array(worldW).fill(null)
+  );
+
+  setupCanvas();
+  draw();
+}
+
+// ─────────────────────────────
+// SMART NAME CLEANING
+// ─────────────────────────────
+function formatName(name) {
+  return name
+    .replace(/\.[^/.]+$/, "")
+    .replace(/[_-]/g, " ");
+}
+
+// ─────────────────────────────
+// LOAD TEXTURES
+// ─────────────────────────────
+document.getElementById("fileInput").addEventListener("change", e => {
+  const files = [...e.target.files];
+
+  files.forEach(file => {
+    const img = new Image();
+    img.src = URL.createObjectURL(file);
+
+    textures.push({
+      name: formatName(file.name),
+      img
+    });
+  });
+
+  setTimeout(renderList, 200);
+});
+
+// ─────────────────────────────
+// TEXTURE LIST UI
+// ─────────────────────────────
+function renderList(filter = "") {
+  const container = document.getElementById("items");
+  container.innerHTML = "";
+
+  textures
+    .filter(t => t.name.toLowerCase().includes(filter.toLowerCase()))
+    .forEach(tex => {
+      const div = document.createElement("div");
+      div.className = "item";
+
+      div.onclick = () => {
+        selected = tex;
+        document.querySelectorAll(".item").forEach(i => i.classList.remove("selected"));
+        div.classList.add("selected");
+      };
+
+      const img = document.createElement("img");
+      img.src = tex.img.src;
+
+      const label = document.createElement("div");
+      label.textContent = tex.name;
+
+      div.appendChild(img);
+      div.appendChild(label);
+
+      container.appendChild(div);
+    });
+}
+
+document.getElementById("search").addEventListener("input", e => {
+  renderList(e.target.value);
+});
+
+// ─────────────────────────────
+// GRID MAPPING (NO RANDOMNESS FIX)
+// ─────────────────────────────
+function getTile(e) {
+  const rect = canvas.getBoundingClientRect();
+
+  return {
+    x: Math.floor((e.clientX - rect.left) / TILE),
+    y: Math.floor((e.clientY - rect.top) / TILE)
+  };
+}
+
+// ─────────────────────────────
+// PLACE TILE
+// ─────────────────────────────
+canvas.addEventListener("click", e => {
+  if (!selected) return;
+
+  const { x, y } = getTile(e);
+
+  if (world[y] && world[y][x] !== undefined) {
+    world[y][x] = selected;
+    draw();
+  }
+});
+
+// erase
+canvas.addEventListener("contextmenu", e => {
+  e.preventDefault();
+
+  const { x, y } = getTile(e);
+
+  if (world[y] && world[y][x] !== undefined) {
+    world[y][x] = null;
+    draw();
+  }
+});
+
+// ─────────────────────────────
+// DRAW ENGINE (VISIBLE GRID FIXED)
+// ─────────────────────────────
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  ctx.imageSmoothingEnabled = false;
+
+  // draw tiles
+  for (let y = 0; y < worldH; y++) {
+    for (let x = 0; x < worldW; x++) {
+      const t = world[y][x];
+      if (t) {
+        ctx.drawImage(t.img, x * TILE, y * TILE, TILE, TILE);
+      }
+    }
+  }
+
+  // STRONG VISIBLE GRID (LIGHT MODE)
+  ctx.strokeStyle = "#c0c0c0";
+  ctx.lineWidth = 1;
+
+  for (let x = 0; x <= worldW; x++) {
+    const px = x * TILE + 0.5;
+
+    ctx.beginPath();
+    ctx.moveTo(px, 0);
+    ctx.lineTo(px, worldH * TILE);
+    ctx.stroke();
+  }
+
+  for (let y = 0; y <= worldH; y++) {
+    const py = y * TILE + 0.5;
+
+    ctx.beginPath();
+    ctx.moveTo(0, py);
+    ctx.lineTo(worldW * TILE, py);
+    ctx.stroke();
+  }
+}
+
+// start
+createWorld();
+</script>
+
+</body>
+</html>
